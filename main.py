@@ -40,6 +40,23 @@ register_env('custom', lambda config: ParallelPettingZooEnv(env_creator(config))
 #env_creator = lambda config: gym.make('CartPole-v0')
 #register_env('custom', lambda config: gym.make('CartPole-v0'))
 
+def group_obs(obs, episode):
+    groups = {}
+    for k, v in obs.items():
+        g = policy_mapping_fn(k, episode)
+        if g not in groups:
+            groups[g] = {}
+        groups[g][k] = v
+    return groups
+
+def ungroup(groups):
+    ungrouped = {}
+    for g in groups.values():
+        for k, v in g.items():
+            assert k not in ungrouped
+            ungrouped[k] = v
+    return ungrouped
+
 def create_policies(n):
     return {f'policy_{i}': 
         PolicySpec(
@@ -123,34 +140,18 @@ def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     deployment.deploy(RLPredictor, checkpoint)
     return deployment.url
 
-def group_obs(obs, episode):
-    groups = {}
-    for k, v in obs.items():
-        g = policy_mapping_fn(k, episode)
-        if g not in groups:
-            groups[g] = {}
-        groups[g][k] = v
-    return groups
-
-def ungroup(groups):
-    ungrouped = {}
-    for g in groups.values():
-        for k, v in g.items():
-            assert k not in ungrouped
-            ungrouped[k] = v
-    return ungrouped
-
-def evaluate_served_policy(endpoint_uri_list, num_episodes: int = 3) -> list:
+def evaluate_served_policy(endpoint_uri_list, num_episodes: int=1, horizon=128) -> list:
     """Evaluate a served RL policy on a local environment.
     This function will create an RL environment and step through it.
     To obtain the actions, it will query the deployed RL model.
     """
     env = env_creator(config={})
+    env = gym.wrappers.RecordVideo(env, 'renders')
 
     for i in range(num_episodes):
         obs = env.reset()
-        done = False
-        while not done:
+        t = 0
+        while True:
             grouped_obs = group_obs(obs, i)
             grouped_actions = {}
 
@@ -158,7 +159,12 @@ def evaluate_served_policy(endpoint_uri_list, num_episodes: int = 3) -> list:
                 grouped_actions[idx] = query_action(endpoint_uri_list[idx], vals)
 
             actions = ungroup(grouped_actions)
-            obs, r, done, _ = env.step(actions)
+            obs, r, dones, _ = env.step(actions)
+
+            if all(list(dones.values())) or t >= horizon:
+                break
+
+            t += 1
 
 def query_action(endpoint_uri: str, obs: np.ndarray):
     """Perform inference on a served RL model.
