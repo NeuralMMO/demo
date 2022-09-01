@@ -5,6 +5,10 @@ import numpy as np
 import requests
 import random
 
+import torch
+from torch import nn
+from torch.nn.utils import rnn
+
 from ray.air.checkpoint import Checkpoint
 from ray.air.config import RunConfig
 from ray.train.rl.rl_trainer import RLTrainer
@@ -17,7 +21,10 @@ from ray import serve
 from ray.tune.tuner import Tuner
 from ray.rllib.policy.policy import PolicySpec
 
-from ray.tune.registry import register_env
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray import rllib
+
+from ray.tune.registry import register_env as tune_register_env
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
 from ray.rllib.env import ParallelPettingZooEnv
 
@@ -49,14 +56,13 @@ def create_policies(n):
         for i in range(n)
     }
 
-def wrap_env_creator(env_creator, name):
-    parallel = lambda: aec_to_parallel_wrapper(env_creator())
-    register_env(name, lambda config: ParallelPettingZooEnv(parallel()))    
-    return parallel
+def register_env(env_creator, name):
+    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator()))    
 
 class RLPredictor(BaseRLPredictor):
     def predict(self, data, **kwargs):
-        data = data.reshape(-1, 13, 13, 5)
+        data = data.reshape(-1, 4477)
+        #data = data.reshape(-1, 13, 13, 5)
         result = super().predict(data, **kwargs)
         return result.reshape(1, -1)
 
@@ -83,9 +89,9 @@ class RLPredictor(BaseRLPredictor):
 '''
 
 
+
 def train_rl_ppo_online(num_workers: int, use_gpu: bool = False) -> Result:
     print("Starting online training")
-
     trainer = RLTrainer(
         run_config=RunConfig(stop={"training_iteration": 1}),
         scaling_config=ScalingConfig(num_workers=num_workers, use_gpu=use_gpu),
@@ -94,13 +100,10 @@ def train_rl_ppo_online(num_workers: int, use_gpu: bool = False) -> Result:
             "env": "custom",
             "framework": "torch",
             "num_sgd_iter": 1,
-            "model": {
-                "conv_filters": [
-                    [1, [13, 13], 1],
-                ],
-                "fcnet_hiddens": [1],
-                "fcnet_activation": "relu",
-            },
+            #"model": {
+            #    'custom_model': 'custom',
+            #    'max_seq_len': 16,
+            #},
         },
     )
 
