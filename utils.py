@@ -90,23 +90,14 @@ class RLPredictor(BaseRLPredictor):
 
 
 
-def train_rl_ppo_online(num_workers: int, use_gpu: bool = False) -> Result:
+def train_rl_ppo_online(rllib_config, num_workers: int, use_gpu: bool = False) -> Result:
     print("Starting online training")
     trainer = RLTrainer(
         run_config=RunConfig(stop={"training_iteration": 1}),
         scaling_config=ScalingConfig(num_workers=num_workers, use_gpu=use_gpu),
         algorithm="PPO",
-        config={
-            "env": "custom",
-            "framework": "torch",
-            "num_sgd_iter": 1,
-            #"model": {
-            #    'custom_model': 'custom',
-            #    'max_seq_len': 16,
-            #},
-        },
+        config=rllib_config,
     )
-
     tuner = Tuner(
         trainer,
         _tuner_kwargs={"checkpoint_at_end": True},
@@ -165,9 +156,9 @@ def query_action(endpoint_uri: str, obs: np.ndarray):
     #action_dict = requests.post(endpoint_uri, json={"array": [[1]]}).json()
     return action_dict
 
-def make_demo(env_creator, policy_mapping_fn, num_policies, num_workers, use_gpu, checkpoint_path):
+def make_demo(rllib_config, env_creator, policy_mapping_fn, num_policies, num_workers, use_gpu, checkpoint_path):
     if checkpoint_path is None:
-        result, trainer = train_rl_ppo_online(num_workers=2, use_gpu=False)
+        result, trainer = train_rl_ppo_online(rllib_config, num_workers=2, use_gpu=False)
         checkpoint = result.checkpoint
     else:
         checkpoint = Checkpoint(checkpoint_path)
