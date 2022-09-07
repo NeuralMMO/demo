@@ -5,6 +5,8 @@ import numpy as np
 import requests
 import random
 
+from collections import defaultdict
+
 import torch
 from torch import nn
 from torch.nn.utils import rnn
@@ -28,7 +30,11 @@ from ray.tune.registry import register_env as tune_register_env
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
 from ray.rllib.env import ParallelPettingZooEnv
 
-def group_obs(obs, policy_mapping_fn, episode):
+import nmmo
+from rating import OpenSkillRating
+
+
+def group(obs, policy_mapping_fn, episode):
     groups = {}
     for k, v in obs.items():
         g = policy_mapping_fn(k, episode)
@@ -61,49 +67,11 @@ def register_env(env_creator, name):
 
 class RLPredictor(BaseRLPredictor):
     def predict(self, data, **kwargs):
-        data = data.reshape(-1, 4477)
-        #data = data.reshape(-1, 13, 13, 5)
+        batch = data.shape[0]
+        #data = data.reshape(batch, -1)
+        data = data.squeeze()
         result = super().predict(data, **kwargs)
         return result.reshape(1, -1)
-
-'''
-            "multiagent": {
-                "policies": {
-                    "red": PolicySpec(
-                        policy_class=None,
-                        observation_space=None,
-                        action_space=None,
-                        config={"gamma": 0.85},
-                     ),
-                    "blue": PolicySpec(
-                        policy_class=None,
-                        observation_space=None,
-                        action_space=None,
-                        config={"gamma": 0.85},
-                     ),
-                },
-                "policy_mapping_fn":
-                    lambda agent_id, episode, worker, **kwargs:
-                        "red" if agent_id.startswith("red") else "blue"
-            },
-'''
-
-
-
-def train_rl_ppo_online(rllib_config, num_workers: int, use_gpu: bool = False) -> Result:
-    print("Starting online training")
-    trainer = RLTrainer(
-        run_config=RunConfig(stop={"training_iteration": 1}),
-        scaling_config=ScalingConfig(num_workers=num_workers, use_gpu=use_gpu),
-        algorithm="PPO",
-        config=rllib_config,
-    )
-    tuner = Tuner(
-        trainer,
-        _tuner_kwargs={"checkpoint_at_end": True},
-    )
-    result = tuner.fit()[0]
-    return result, trainer
 
 def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     """Serve a RL model and return deployment URI.
@@ -115,7 +83,7 @@ def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     deployment.deploy(RLPredictor, checkpoint)
     return deployment.url
 
-def evaluate_served_policy(policy_mapping_fn, env_creator, endpoint_uri_list, num_episodes: int=1, horizon=128) -> list:
+def run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list, horizon=128):
     """Evaluate a served RL policy on a local environment.
     This function will create an RL environment and step through it.
     To obtain the actions, it will query the deployed RL model.
@@ -123,23 +91,44 @@ def evaluate_served_policy(policy_mapping_fn, env_creator, endpoint_uri_list, nu
     env = env_creator()
     env = gym.wrappers.RecordVideo(env, 'renders')
 
-    for i in range(num_episodes):
-        obs = env.reset()
-        t = 0
-        while True:
-            grouped_obs = group_obs(obs, policy_mapping_fn, i)
-            grouped_actions = {}
+    obs = env.reset()
+    policy_rewards = defaultdict(float)
+    for t in range(horizon):
+        # Compute actions per policy
+        grouped_actions = {}
+        for idx, vals, in group(obs, policy_mapping_fn, episode).items():
+            grouped_actions[idx] = query_action(endpoint_uri_list[idx], vals)
+        actions = ungroup(grouped_actions)
 
-            for idx, vals, in grouped_obs.items():
-                grouped_actions[idx] = query_action(endpoint_uri_list[idx], vals)
+        # Centralized env step
+        obs, rewards, dones, _ = env.step(actions)
 
-            actions = ungroup(grouped_actions)
-            obs, r, dones, _ = env.step(actions)
+        # Compute policy rewards
+        for key, val in rewards.items():
+            policy = policy_mapping_fn(key, episode)
+            policy_rewards[policy] += val
 
-            if all(list(dones.values())) or t >= horizon:
-                break
+        if all(list(dones.values())):
+            break
 
-            t += 1
+    return policy_rewards
+
+
+def run_tournament(policy_mapping_fn, env_creator, endpoint_uri_list, num_games=5, horizon=16):
+    agents = [i for i in range(len(endpoint_uri_list))]
+    ratings = OpenSkillRating(agents, 0)
+
+    for episode in range(num_games):
+        rewards = run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list)
+
+        ratings.update(
+                policy_ids=list(rewards),
+                scores=list(rewards.values())
+        )
+
+        print(ratings)
+
+    return ratings
 
 def query_action(endpoint_uri: str, obs: np.ndarray):
     """Perform inference on a served RL model.
@@ -149,7 +138,7 @@ def query_action(endpoint_uri: str, obs: np.ndarray):
     #action_dict = requests.post(endpoint_uri, json={"array": obs.tolist()}).json()
     #obs = {k: v.ravel().tolist() for k, v in obs.items()}
     #action_dict = requests.post(endpoint_uri, json=obs).json()
-    vals = [v.ravel().tolist() for v in obs.values()]
+    vals = [v.tolist() for v in obs.values()]
     action_vals = requests.post(endpoint_uri, json={"array": vals}).json()
     action_dict = {key: val for key, val in zip(list(obs.keys()), action_vals)}
 
@@ -157,12 +146,7 @@ def query_action(endpoint_uri: str, obs: np.ndarray):
     return action_dict
 
 def make_demo(rllib_config, env_creator, policy_mapping_fn, num_policies, num_workers, use_gpu, checkpoint_path):
-    if checkpoint_path is None:
-        result, trainer = train_rl_ppo_online(rllib_config, num_workers=2, use_gpu=False)
-        checkpoint = result.checkpoint
-    else:
-        checkpoint = Checkpoint(checkpoint_path)
-
-    endpoint_uri_list = [serve_rl_model(checkpoint) for _ in range(num_policies)]
-    evaluate_served_policy(policy_mapping_fn, env_creator, endpoint_uri_list)
+    checkpoints = [Checkpoint(checkpoint_path) for _ in range(num_policies)]
+    endpoint_uri_list = [serve_rl_model(c) for c in checkpoints]
+    run_tournament(policy_mapping_fn, env_creator, endpoint_uri_list)
     serve.shutdown()  

@@ -122,8 +122,14 @@ trainer = RLTrainer(
         "env": "custom",
         "framework": "torch",
         "num_sgd_iter": 1,
+        "rollout_fragment_length": 32,
+        "train_batch_size": 128,
+        "multiagent": {
+            "count_steps_by": "agent_steps"
+        },
         "model": {
             "custom_model": "custom",
+            "max_seq_len": 16
         },
     }
 )
