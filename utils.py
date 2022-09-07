@@ -71,6 +71,9 @@ class RLPredictor(BaseRLPredictor):
         #data = data.reshape(batch, -1)
         data = data.squeeze()
         result = super().predict(data, **kwargs)
+        result = np.concatenate(list(result.values())).reshape(1, -1)
+        return result
+        print(result)
         return result.reshape(1, -1)
 
 def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
@@ -83,7 +86,7 @@ def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     deployment.deploy(RLPredictor, checkpoint)
     return deployment.url
 
-def run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list, horizon=128):
+def run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list, horizon=1024):
     """Evaluate a served RL policy on a local environment.
     This function will create an RL environment and step through it.
     To obtain the actions, it will query the deployed RL model.
@@ -92,6 +95,7 @@ def run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list, horizon
     env = gym.wrappers.RecordVideo(env, 'renders')
 
     obs = env.reset()
+    env.render()
     policy_rewards = defaultdict(float)
     for t in range(horizon):
         # Compute actions per policy
@@ -102,6 +106,7 @@ def run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list, horizon
 
         # Centralized env step
         obs, rewards, dones, _ = env.step(actions)
+        env.render()
 
         # Compute policy rewards
         for key, val in rewards.items():
@@ -140,7 +145,9 @@ def query_action(endpoint_uri: str, obs: np.ndarray):
     #action_dict = requests.post(endpoint_uri, json=obs).json()
     vals = [v.tolist() for v in obs.values()]
     action_vals = requests.post(endpoint_uri, json={"array": vals}).json()
-    action_dict = {key: val for key, val in zip(list(obs.keys()), action_vals)}
+    action_vals = np.array(action_vals).reshape(8, -1)
+    action_dict = {key: action_vals[:, i] for i, key in enumerate(obs)}
+    #action_dict = {key: val for key, val in zip(list(obs.keys()), action_vals)}
 
     #action_dict = requests.post(endpoint_uri, json={"array": [[1]]}).json()
     return action_dict
