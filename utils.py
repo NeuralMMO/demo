@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+from turtle import end_poly
 
 import gym
 import numpy as np
@@ -157,3 +158,59 @@ def make_demo(rllib_config, env_creator, policy_mapping_fn, num_policies, num_wo
     endpoint_uri_list = [serve_rl_model(c) for c in checkpoints]
     run_tournament(policy_mapping_fn, env_creator, endpoint_uri_list)
     serve.shutdown()  
+
+class Tournament:
+    def __init__(self, env_creator, policy_mapping_fn, num_policies, mu, sigma):
+        '''Runs matches for a pool of served policies'''
+        self.env_creator = env_creator
+        self.policy_mapping_fn = policy_mapping_fn
+        self.num_policies = num_policies
+        self.served_policies = {}
+
+        # TODO: Add anchor
+        self.rating = nmmo.OpenSkillRating([], 0,
+            mu=mu,
+            sigma=sigma
+        )
+
+    def add(self, name, policy_checkpoint):
+        '''Add policy to pool of served models'''
+        endpoint_uri = serve_rl_model(policy_checkpoint)
+        assert name not in self.served_policies
+        self.served_policies[name] = endpoint_uri
+        self.rating.add_policy(name)
+
+    def remove(self, name):
+        '''Remove policy from pool of served models'''
+        assert name in self.served_policies
+        endpoint_uri = self.served_policies[name]
+        unserve_rl_model(endpoint_uri)
+        del self.served_policies[name]
+        self.ratings.remove_policy(name)
+
+    def run_match(self):
+        '''Select participants and run a single game to update ratings'''
+        policies = random.choice(list(self.served_policies.keys()), self.num_policies)
+
+        rewards = run_game(
+            policies, 
+            self.policy_mapping_fn,
+            self.env_creator,
+            self.endpoint_uri_list,
+        )
+
+        self.ratings.update(
+                policy_ids=list(rewards),
+                scores=list(rewards.values())
+        )
+
+        return self.ratings
+
+
+
+
+    
+
+
+
+

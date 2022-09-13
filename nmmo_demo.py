@@ -24,6 +24,12 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
+# Dashboard fails on WSL
+NUM_GPUS = int(torch.cuda.is_available())
+NUM_GPUS = 0
+import ray
+ray.init(include_dashboard=False, num_gpus=NUM_GPUS)
+
 from ray.air.config import RunConfig
 from ray.air.config import ScalingConfig  
 from ray.tune.registry import register_env
@@ -116,7 +122,7 @@ obs = test_env.reset()
 
 trainer = RLTrainer(
     run_config=RunConfig(stop={"training_iteration": 1}),
-    scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
+    scaling_config=ScalingConfig(num_workers=2, use_gpu=bool(NUM_GPUS)),
     algorithm="PPO",
     config={
         "env": "custom",
