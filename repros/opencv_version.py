@@ -9,7 +9,6 @@ from ray.train.rl.rl_trainer import RLTrainer
 from ray.tune.tuner import Tuner
 from ray.tune.registry import register_env
 from ray.rllib.env import ParallelPettingZooEnv
-from ray.rllib.policy.policy import PolicySpec
 
 
 def env_creator():
@@ -19,8 +18,6 @@ def env_creator():
             dead_penalty=-0.1, attack_penalty=-0.1, attack_opponent_reward=0.2,
             max_cycles=1000, extra_features=False))
 
-def policy_mapping_fn(agent_id, episode, worker=None, **kwargs):
-    return 'red' if agent_id.startswith('red') else 'blue'
 
 register_env('custom', lambda config: ParallelPettingZooEnv(env_creator()))
 
@@ -32,23 +29,6 @@ trainer = RLTrainer(
         "env": "custom",
         "framework": "torch",
         "num_sgd_iter": 1,
-        "multiagent": {
-            "policies": {
-                "red": PolicySpec(
-                    policy_class=None,
-                    observation_space=None,
-                    action_space=None,
-                    config={"gamma": 0.85},
-                ),
-                "blue": PolicySpec(
-                    policy_class=None,
-                    observation_space=None,
-                    action_space=None,
-                    config={"gamma": 0.85},
-                ),
-            },
-            "policy_mapping_fn": policy_mapping_fn,
-        },
         "model": {
             "conv_filters": [
                 [1, [13, 13], 1],
@@ -65,5 +45,4 @@ tuner = Tuner(
 )
 
 result = tuner.fit()[0] 
-T()
 print('Saved ', result.checkpoint)

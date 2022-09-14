@@ -65,5 +65,7 @@ tuner = Tuner(
 )
 
 result = tuner.fit()[0] 
-T()
-print('Saved ', result.checkpoint)
+
+from ray.train.rl import RLCheckpoint
+policy = RLCheckpoint.from_checkpoint(result.checkpoint).get_policy()
+print(policy)

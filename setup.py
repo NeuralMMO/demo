@@ -17,6 +17,7 @@ setup(
         'opencv-python==3.4.17.63',
         'nmmo==1.6.0.2',
         'openskill==2.4.0',
+        'magent==0.2.4',
     ],
     python_requires=">=3.8",
     license="MIT",

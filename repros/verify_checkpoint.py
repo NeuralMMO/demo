@@ -65,5 +65,12 @@ tuner = Tuner(
 )
 
 result = tuner.fit()[0] 
-T()
-print('Saved ', result.checkpoint)
+
+# Save a checkpoint with no policy
+from ray.train.rl import RLCheckpoint
+checkpoint = RLCheckpoint.from_checkpoint(result.checkpoint)
+
+# Silently loads a checkpoint with no policy
+from ray.train.rl.rl_predictor import RLPredictor
+predictor = RLPredictor.from_checkpoint(checkpoint)
+print(predictor.policy)
