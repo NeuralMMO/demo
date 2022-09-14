@@ -1,45 +1,25 @@
+from gc import callbacks
 from pdb import set_trace as T
 
 import nmmo
 
-import utils
-
-from pdb import set_trace as T
-
-import functools
-
-import os
-import sys
-import random
-import time
-
-import wandb
-import gym
 import numpy as np
-import supersuit as ss
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.distributions.categorical import Categorical
-from torch.utils.tensorboard import SummaryWriter
 
-# Dashboard fails on WSL
-NUM_GPUS = int(torch.cuda.is_available())
-NUM_GPUS = 0
 import ray
-ray.init(include_dashboard=False, num_gpus=NUM_GPUS)
-
 from ray.air.config import RunConfig
 from ray.air.config import ScalingConfig  
 from ray.tune.registry import register_env
 from ray.tune.tuner import Tuner
+from ray.tune.integration.wandb import WandbLoggerCallback
 from ray.train.rl.rl_trainer import RLTrainer
-from ray import rllib
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.env import ParallelPettingZooEnv 
 from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
+from ray.rllib.algorithms.callbacks import DefaultCallbacks
+
 
 import nmmo
 import config
@@ -107,29 +87,65 @@ class Policy(RecurrentNetwork, nn.Module):
     def value_function(self):
         return self.val.view(-1)
 
+class NMMOLogger(DefaultCallbacks):
+    def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
+        assert len(base_env.envs) == 1, 'One env per worker'
+        env = base_env.envs[0]
+
+        for key, vals in stats.items():
+            policy_stat = defaultdict(list)
+
+            # Per-population metrics
+            for policy_id, v in zip(policy_ids, vals):
+                policy_stat[policy_id].append(v)
+
+            for policy_id, vals in policy_stat.items():
+                policy = inv_map[policy_id].__name__
+
+                k = f'{policy}_{policy_id}_{key}'
+                episode.custom_metrics[k] = np.mean(vals)
+
 class Config(Train):
     RESPAWN = False
     HIDDEN = 2
 
 
+# Dashboard fails on WSL
+ray.init(include_dashboard=False, num_gpus=1)
+
 config = Config()
 ModelCatalog.register_custom_model('custom', Policy) 
 env_creator = lambda: nmmo.integrations.CleanRLEnv(Config())
-register_env('custom', lambda config: ParallelPettingZooEnv(env_creator()))
+register_env('nmmo', lambda config: ParallelPettingZooEnv(env_creator()))
 
 test_env = env_creator()
 obs = test_env.reset()
 
 trainer = RLTrainer(
-    run_config=RunConfig(stop={"training_iteration": 1}),
-    scaling_config=ScalingConfig(num_workers=2, use_gpu=bool(NUM_GPUS)),
+    run_config=RunConfig(
+        stop={"training_iteration": 3},
+        callbacks=[
+            WandbLoggerCallback(
+                project='NeuralMMO',
+                api_key_file='wandb_api_key',
+                log_config=False,
+            )
+        ]
+    ),
+    callbacks=NMMOLogger,
+    scaling_config=ScalingConfig(num_workers=2, use_gpu=True),
     algorithm="PPO",
     config={
-        "env": "custom",
-        "framework": "torch",
-        "num_sgd_iter": 1,
+        "num_gpus": 1,
+        "num_workers": 4,
+        "num_envs_per_worker": 1,
         "rollout_fragment_length": 32,
-        "train_batch_size": 128,
+        "train_batch_size": 2**10,
+        "sgd_minibatch_size": 128,
+        #"train_batch_size": 2**19,
+        "num_sgd_iter": 1,
+        "framework": "torch",
+        "env": "nmmo",
         "multiagent": {
             "count_steps_by": "agent_steps"
         },
@@ -143,6 +159,9 @@ trainer = RLTrainer(
 tuner = Tuner(
     trainer,
     _tuner_kwargs={"checkpoint_at_end": True},
+    param_space={
+        'callbacks': NMMOLogger,
+    }
 )
 
 result = tuner.fit()[0]

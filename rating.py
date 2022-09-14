@@ -23,7 +23,7 @@ class OpenSkillRating:
 
     Provides a simple method for updating skill estimates from raw
     per-agent scores as are typically returned by the environment.'''
-    def __init__(self, agents, anchor, mu=1000, sigma=100/3, anchor_mu=1500):
+    def __init__(self, mu, anchor_mu, sigma, agents=[], anchor=None):
         '''
         Args:
             agents: List of agent classes to rank
@@ -35,23 +35,46 @@ class OpenSkillRating:
             err = 'Agents must be ordered (e.g. list, not set)'
             assert type(agents) != set, err
 
-        self.ratings = {agent:
-                openskill.Rating(mu=mu, sigma=sigma)
-                for agent in agents}
-
+        self.ratings = {}
         self.mu        = mu
-        self.sigma     = sigma
-        self.anchor    = anchor
         self.anchor_mu = anchor_mu
+        self.sigma     = sigma
 
-        self.anchor_baseline()
+        for e in agents:
+            self.add_policy(e)
+
+        self.anchor    = anchor
+        self._anchor_baseline()
 
     def __str__(self):
         return ', '.join(f'{p}: {int(r.mu)}' for p, r in self.ratings.items())
 
     @property
     def stats(self):
-        return {p.__name__: int(r.mu) for p, r in self.ratings.items()}
+        return {p: int(r.mu) for p, r in self.ratings.items()}
+
+    def _anchor_baseline(self):
+        '''Resets the anchor point policy to mu SR'''
+        for agent, rating in self.ratings.items():
+            rating.sigma = self.sigma
+            if agent == self.anchor:
+                rating.mu    = self.anchor_mu
+                rating.sigma = self.sigma
+
+    def set_anchor(self, name):
+        if self.anchor is not None:
+            self.remove_policy(self.anchor)
+        self.add_policy(name)
+        self.anchor = name
+        self._anchor_baseline()
+
+    def add_policy(self, name):
+        assert name not in self.ratings, f'Policy {name} already added to ratings'
+        self.ratings[name] = openskill.Rating(mu=self.mu, sigma=self.sigma)
+
+    def remove_policy(self, name):
+        assert name in self.ratings, f'Policy {name} not in ratings'
+        del self.ratings[name]
 
     def update(self, policy_ids, ranks=None, scores=None):
         '''Updates internal skill rating estimates for each policy
@@ -71,6 +94,8 @@ class OpenSkillRating:
             err = 'Specify either ranks or scores'
             assert (ranks is None) != (scores is None), err
 
+        assert self.anchor is not None, 'Set the anchor policy before updating ratings'
+
         if ranks is None:
             ranks = rank(policy_ids, scores)
 
@@ -80,14 +105,6 @@ class OpenSkillRating:
         for agent, rating in zip(policy_ids, ratings):
             self.ratings[agent] = rating
 
-        self.anchor_baseline()
+        self._anchor_baseline()
 
         return self.ratings
-
-    def anchor_baseline(self):
-        '''Resets the anchor point policy to mu SR'''
-        for agent, rating in self.ratings.items():
-            rating.sigma = self.sigma
-            if agent == self.anchor:
-                rating.mu    = self.anchor_mu
-                rating.sigma = self.sigma

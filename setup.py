@@ -14,8 +14,9 @@ setup(
     include_package_data=True,
     install_requires=[
         'ray[all]==2.0.0',
-        'opencv==3.4.17.63',
-        'nmmo==1.6.0',
+        'opencv-python==3.4.17.63',
+        'nmmo==1.6.0.2',
+        'openskill==2.4.0',
     ],
     python_requires=">=3.8",
     license="MIT",
