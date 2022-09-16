@@ -13,21 +13,17 @@ from ray.air.config import ScalingConfig
 from ray.tune.registry import register_env
 from ray.tune.tuner import Tuner
 from ray.tune.integration.wandb import WandbLoggerCallback
-from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_trainer import RLTrainer
 from ray.rllib.models import ModelCatalog
 from ray.rllib.env import ParallelPettingZooEnv 
 from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
-
 import nmmo
 import config
 
 from neural import policy, io, subnets
 from config.cleanrl import Train
-
-import utils
 
 
 class BatchFirstLSTM(nn.LSTM):
@@ -95,15 +91,6 @@ class NMMOLogger(DefaultCallbacks):
         if not os.path.exists('checkpoints'):
             os.mkdir('checkpoints')
 
-        '''
-        if not hasattr(self, 'tournament'):
-            print('Making Tournament')
-            self.tournament = utils.RemoteTournament()
-            self.tournament.async_from_path(
-                'checkpoints', num_policies,
-                env_creator, policy_mapping_fn)
-        '''
-
         trainer.save_checkpoint('checkpoints')
 
 
@@ -154,7 +141,6 @@ class Config(Train):
 # Dashboard fails on WSL
 ray.init(include_dashboard=False, num_gpus=1)
 
-Config.HORIZON = 16
 config = Config()
 ModelCatalog.register_custom_model('custom', Policy) 
 env_creator = lambda: nmmo.integrations.CleanRLEnv(Config())
@@ -163,6 +149,10 @@ register_env('nmmo', lambda config: ParallelPettingZooEnv(env_creator()))
 test_env = env_creator()
 obs = test_env.reset()
 
+# Full scale settings:
+#   train_batch_size = 2**19
+#   num_workers = 32
+#   training_iterations = 1000
 trainer = RLTrainer(
     run_config=RunConfig(
         local_dir='results',
@@ -178,13 +168,13 @@ trainer = RLTrainer(
     ),
     scaling_config=ScalingConfig(num_workers=2, use_gpu=True),
     algorithm="PPO",
+
     config={
         "num_gpus": 1,
         "num_workers": 4,
         "num_envs_per_worker": 1,
         "rollout_fragment_length": 32,
         "train_batch_size": 2**10,
-        #"train_batch_size": 2**19,
         "sgd_minibatch_size": 128,
         "num_sgd_iter": 1,
         "framework": "torch",
@@ -207,21 +197,5 @@ tuner = Tuner(
     }
 )
 
-
 result = tuner.fit()[0]
 print('Saved ', result.checkpoint)
-
-
-#policy = RLCheckpoint.from_checkpoint(result.checkpoint).get_policy()
-
-'''
-def multiagent_self_play(trainer: Type[Trainer]):
-    new_weights = trainer.get_policy("player1").get_weights()
-    for opp in Config.OPPONENT_POLICIES:
-        prev_weights = trainer.get_policy(opp).get_weights()
-        trainer.get_policy(opp).set_weights(new_weights)
-        new_weights = prev_weights
-
-local_weights = trainer.workers.local_worker().get_weights()
-trainer.workers.foreach_worker(lambda worker: worker.set_weights(local_weights))
-'''

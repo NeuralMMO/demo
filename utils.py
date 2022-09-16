@@ -4,6 +4,8 @@ import gym
 import numpy as np
 import requests
 import random
+import time
+import os
 
 from collections import defaultdict
 
@@ -11,6 +13,7 @@ import torch
 from torch import nn
 from torch.nn.utils import rnn
 
+import ray
 from ray.air.checkpoint import Checkpoint
 from ray.air.config import RunConfig
 from ray.train.rl.rl_trainer import RLTrainer
@@ -165,6 +168,33 @@ class Tournament:
         if deploy:
             serve.start(detached=True)
 
+    def async_from_path(self, path, num_policies, env_creator, policy_mapping_fn, policy_sampling_fn=random.sample):
+        rating_file = open('ratings.txt', 'w')
+
+        episode = 0
+        while True:
+            files = os.listdir(path) 
+            files = [e for e in files if e.startswith('checkpoint')]
+
+            for f in files:
+                if f in self.policies:
+                    continue
+
+                checkpoint = RLCheckpoint.from_directory(f)
+                self.add(f, checkpoint)
+
+            ratings = self.run_match(
+                num_policies, env_creator, policy_mapping_fn,
+                policy_sampling_fn, episode=episode
+            )
+
+            rating_file.write(str(ratings))
+            print(ratings)
+
+            episode += 1
+            time.sleep(10)
+
+
     def add(self, name, policy_checkpoint, anchor=False):
         '''Add policy to pool of served models'''
         assert name not in self.policies
@@ -220,4 +250,8 @@ class Tournament:
         )
 
         return self.ratings
+
+@ray.remote
+class RemoteTournament(Tournament):
+    pass
 
