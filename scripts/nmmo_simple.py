@@ -2,8 +2,6 @@ from pdb import set_trace as T
 
 import nmmo
 
-import utils
-
 from pdb import set_trace as T
 
 import functools
@@ -44,7 +42,7 @@ class Config(Train):
     RESPAWN = False
 
 env_creator = lambda: nmmo.integrations.CleanRLEnv(Config())
-register_env('custom', lambda config: ParallelPettingZooEnv(env_creator()))
+register_env('nmmo', lambda config: ParallelPettingZooEnv(env_creator()))
 
 
 test_env = env_creator()
@@ -55,7 +53,7 @@ trainer = RLTrainer(
     scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
     algorithm="PPO",
     config={
-        "env": "custom",
+        "env": "nmmo",
         "framework": "torch",
         "num_sgd_iter": 1,
         "model": {
