@@ -29,7 +29,7 @@ num_policies = 2
 num_teams = 2
 checkpoint_path = '/home/jsuarez/ray_results/AIRPPO_2022-09-18_01-52-11/AIRPPO_0b88d_00000_0_2022-09-18_01-52-14/checkpoint_000001'
 
-tournament = pufferlib.evaluation.Tournament(num_policies, env_creator, policy_mapping_fn)
+tournament = pufferlib.evaluation.LocalTournament(num_policies, env_creator, policy_mapping_fn)
 
 for i in range(num_policies):
     checkpoint = Checkpoint(checkpoint_path)
