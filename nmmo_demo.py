@@ -124,7 +124,6 @@ tuner = Tuner(
 result = tuner.fit()[0]
 print('Saved ', result.checkpoint)
 
-
 #policy = RLCheckpoint.from_checkpoint(result.checkpoint).get_policy()
 
 '''
