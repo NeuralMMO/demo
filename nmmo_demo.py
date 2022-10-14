@@ -1,10 +1,7 @@
 from pdb import set_trace as T
 import numpy as np
-import os
 
 from collections import defaultdict
-
-
 
 import ray
 from ray.air import CheckpointConfig
@@ -25,6 +22,8 @@ from policy import make_policy
 
 class NMMOLogger(DefaultCallbacks):
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
+        T()
+
         assert len(base_env.envs) == 1, 'One env per worker'
         env = base_env.envs[0].par_env
 
